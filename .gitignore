@@ -5,3 +5,4 @@ venv
 
 audio/*
 !audio/.gitkeep
+docker-compose.deploy.yml
