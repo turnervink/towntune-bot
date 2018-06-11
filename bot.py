@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 import os
 from threading import Thread
 import time
@@ -9,6 +10,8 @@ import pytz
 
 if not discord.opus.is_loaded():
     discord.opus.load_opus('./libopus.so')
+
+logging.basicConfig(level=logging.INFO)
 
 
 def is_dst(zonename):
@@ -152,6 +155,16 @@ class TownTuneBot:
 
         return state
 
+    def play_hour_chime(self, voice_state):
+        voice_state.player = voice_state.voice_client.create_ffmpeg_player(
+            filename='audio/hour-chime.mp3')
+        voice_state.player.start()
+
+        while voice_state.player.is_playing():
+            time.sleep(1)
+
+        return
+
     def schedule_voice_client_update(self, seconds):
         """
         Check each VoiceClient for possible updates.
@@ -166,23 +179,35 @@ class TownTuneBot:
     def update_voice_clients(self):
         """Check each active voice client to see if its song needs to be changed or restarted. """
         for server_id, state in self.voice_states.items():
-            print(state.server.name)
+            if os.environ['ENV'] == 'development':
+                logging.info('Updating client on server %s - %s', state.server.id, state.server.name)
 
             last_checked_hour = state.last_checked_hour
             current_server_hour = self.test_hour if self.test_hour is not None else (
                     dt.datetime.today() + dt.timedelta(hours=get_utc_offset_for_server(state.server))).hour
 
             if last_checked_hour != current_server_hour:
-                print('Changing to next song')
-                state.player.stop()
-                player = state.voice_client.create_ffmpeg_player(filename='audio/{}.mp3'.format(current_server_hour))
-                player.start()
+                if os.environ['ENV'] == 'development':
+                    logging.info('Changing to next song on server %s - %s', state.server.id, state.server.name)
 
-                state.player = player
+                if state.player.is_playing():
+                    for i in range(0, 5):
+                        state.player.volume = state.player.volume - 0.2
+                        time.sleep(0.5)
+
+                    state.player.stop()
+                    self.play_hour_chime(state)
+
+                state.player = state.voice_client.create_ffmpeg_player(
+                    filename='audio/{}.mp3'.format(current_server_hour))
+                state.player.start()
+
                 state.last_checked_hour = current_server_hour
             else:
                 if not state.is_playing():
-                    print('Restarting song')
+                    if os.environ['ENV'] == 'development':
+                        logging.info('Restarting song on server %s - %s', state.server.id, state.server.name)
+
                     player = state.voice_client.create_ffmpeg_player(
                         filename='audio/{}.mp3'.format(current_server_hour))
                     player.start()
@@ -190,18 +215,23 @@ class TownTuneBot:
                     state.player = player
                     state.last_checked_hour = current_server_hour
                 else:
-                    print('Ignoring check')
+                    if os.environ['ENV'] == 'development':
+                        logging.info('Continuing song on server %s - %s', state.server.id, state.server.name)
 
         update_thread = Thread(target=self.schedule_voice_client_update, args=(10,))
         update_thread.start()
 
     @commands.command(pass_context=True, no_pm=True)
     async def settesthour(self, ctx, *, hour: int=None):
-        self.test_hour = hour
-        print('Test hour is now {}'.format(self.test_hour))
+        if os.environ['ENV'] == 'development':
+            self.test_hour = hour
+            logging.info('Test hour is now {}'.format(self.test_hour))
+        else:
+            logging.warning('Development command was tried in %s - %s', ctx.message.server.name, ctx.message.server.id)
+            return False
 
     @commands.command(pass_context=True, no_pm=True)
-    async def towntune(self, ctx):
+    async def start(self, ctx):
         """
         Summon the bot to a voice channel and play the correct song for the server hour.
 
@@ -222,7 +252,6 @@ class TownTuneBot:
 
         current_server_hour = (dt.datetime.today()
                                + dt.timedelta(hours=get_utc_offset_for_server(ctx.message.server))).hour
-        print('Hour is {}'.format(current_server_hour))
 
         try:
             player = state.voice_client.create_ffmpeg_player(filename='audio/{}.mp3'.format(current_server_hour))
@@ -231,6 +260,7 @@ class TownTuneBot:
             state.player = player
             state.last_checked_hour = current_server_hour
         except Exception as e:
+            logging.error('An error occurred in %s - %s\n%s', ctx.message.server.name, ctx.message.server.id, e)
             fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
             await self.bot.send_message(ctx.message.channel, fmt.format(type(e).__name__, e))
 
@@ -254,11 +284,12 @@ class TownTuneBot:
             await state.voice_client.disconnect()
             del self.voice_states[server.id]
         except Exception as e:
+            logging.error('An error occurred in %s - %s\n%s', ctx.message.server.name, ctx.message.server.id, e)
             fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
             await self.bot.send_message(ctx.message.channel, fmt.format(type(e).__name__, e))
 
 
-bot = commands.Bot(command_prefix=commands.when_mentioned_or('~'), description="Welcome to Animal Crossing!")
+bot = commands.Bot(command_prefix=commands.when_mentioned, description="Welcome to Animal Crossing!")
 town_tune_bot = TownTuneBot(bot)
 bot.add_cog(town_tune_bot)
 
@@ -266,6 +297,6 @@ bot.add_cog(town_tune_bot)
 @bot.event
 async def on_ready():
     """Called when the bot successfully logs in."""
-    print('Logged in as:\n{0} (ID: {0.id})'.format(bot.user))
+    logging.info('Logged in as:%s (ID: %s)', bot.user, bot.user.id)
 
 bot.run(os.environ['BOT_TOKEN'])
