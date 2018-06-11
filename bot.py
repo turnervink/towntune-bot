@@ -198,7 +198,8 @@ class TownTuneBot:
                     state.player.stop()
                     self.play_hour_chime(state)
 
-                state.player = state.voice_client.create_ffmpeg_player(filename='audio/{}.mp3'.format(current_server_hour))
+                state.player = state.voice_client.create_ffmpeg_player(
+                    filename='audio/{}.mp3'.format(current_server_hour))
                 state.player.start()
 
                 state.last_checked_hour = current_server_hour
@@ -259,7 +260,7 @@ class TownTuneBot:
             state.player = player
             state.last_checked_hour = current_server_hour
         except Exception as e:
-            logging.error('An error occurred in %s - %s\n%s', ctx.message.server.name, ctx.messager.server.id, e)
+            logging.error('An error occurred in %s - %s\n%s', ctx.message.server.name, ctx.message.server.id, e)
             fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
             await self.bot.send_message(ctx.message.channel, fmt.format(type(e).__name__, e))
 
@@ -283,7 +284,7 @@ class TownTuneBot:
             await state.voice_client.disconnect()
             del self.voice_states[server.id]
         except Exception as e:
-            logging.error('An error occurred in %s - %s\n%s', ctx.message.server.name, ctx.messager.server.id, e)
+            logging.error('An error occurred in %s - %s\n%s', ctx.message.server.name, ctx.message.server.id, e)
             fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
             await self.bot.send_message(ctx.message.channel, fmt.format(type(e).__name__, e))
 
