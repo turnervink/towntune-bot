@@ -1,7 +1,7 @@
 import datetime as dt
 import logging
 import os
-from threading import Thread
+from threading import Thread, Event
 import time
 
 import discord
@@ -123,6 +123,17 @@ class VoiceState:
         return self.player.is_playing()
 
 
+class BotThread(Thread):
+    def __init__(self, event, bot):
+        Thread.__init__(self)
+        self.stopped = event
+        self.bot = bot
+
+    def run(self):
+        while not self.stopped.wait(10):
+            self.bot.update_voice_clients()
+
+
 class TownTuneBot:
     """A bot to play the right ACNL song for the current hour in your server's region. Contains commands to start and
     stop the bot and periodically checks each active VoiceClient to see if its song needs to be changed or restarted.
@@ -136,8 +147,9 @@ class TownTuneBot:
         self.voice_states = {}
         self.test_hour = None
 
-        update_thread = Thread(target=self.schedule_voice_client_update, args=(10,))
-        update_thread.start()
+        self.stopFlag = Event()
+        self.update_thread = BotThread(self.stopFlag, self)
+        self.update_thread.start()
 
     def get_voice_state(self, server):
         """
@@ -182,6 +194,9 @@ class TownTuneBot:
             if os.environ['ENV'] == 'development':
                 logging.info('Updating client on server %s - %s', state.server.id, state.server.name)
 
+            # if len(state.voice_client.channel.voice_members) == 1:
+            #     logging.info('Dropping')
+
             last_checked_hour = state.last_checked_hour
             current_server_hour = self.test_hour if self.test_hour is not None else (
                     dt.datetime.today() + dt.timedelta(hours=get_utc_offset_for_server(state.server))).hour
@@ -190,7 +205,7 @@ class TownTuneBot:
                 if os.environ['ENV'] == 'development':
                     logging.info('Changing to next song on server %s - %s', state.server.id, state.server.name)
 
-                if state.player.is_playing():
+                if state.is_playing():
                     for i in range(0, 5):
                         state.player.volume = state.player.volume - 0.2
                         time.sleep(0.5)
@@ -217,9 +232,6 @@ class TownTuneBot:
                 else:
                     if os.environ['ENV'] == 'development':
                         logging.info('Continuing song on server %s - %s', state.server.id, state.server.name)
-
-        update_thread = Thread(target=self.schedule_voice_client_update, args=(10,))
-        update_thread.start()
 
     @commands.command(pass_context=True, no_pm=True)
     async def settesthour(self, ctx, *, hour: int=None):
