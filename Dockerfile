@@ -7,8 +7,6 @@ WORKDIR /app
 
 COPY . .
 
-ARG BOT_TOKEN=NDU1MjM0MjgyMTY0NzE1NTM4.Df-DNQ.gBtDd6a4gxbK_7mdeCnNqGtSm8c
-
 RUN pip3 install discord.py[voice]
 RUN pip3 install asyncio
 RUN pip3 install pytz
