@@ -134,7 +134,7 @@ class BotThread(Thread):
             self.bot.update_voice_clients()
 
 
-class TownTuneBot:
+class TownTuneBot(commands.Cog):
     """A bot to play the right ACNL song for the current hour in your server's region. Contains commands to start and
     stop the bot and periodically checks each active VoiceClient to see if its song needs to be changed or restarted.
     """
@@ -151,7 +151,7 @@ class TownTuneBot:
         self.update_thread = BotThread(self.stopFlag, self)
         self.update_thread.start()
 
-    def get_voice_state(self, server):
+    def get_voice_state(self, guild):
         """
         Get the VoiceState object for a server, or create one if it doesn't exist.
 
@@ -159,20 +159,18 @@ class TownTuneBot:
         :return: the VoiceState object
         :rtype: VoiceState
         """
-        state = self.voice_states.get(server.id)
+        state = self.voice_states.get(guild.id)
         if state is None:
             state = VoiceState(self.bot)
-            state.server = server
-            self.voice_states[server.id] = state
+            state.guild = guild
+            self.voice_states[guild.id] = state
 
         return state
 
     def play_hour_chime(self, voice_state):
-        voice_state.player = voice_state.voice_client.create_ffmpeg_player(
-            filename='audio/hour-chime.mp3')
-        voice_state.player.start()
+        voice_state.voice.client.play(discord.FFmpegPCMAudio('audio/hour-chime.mp3'))
 
-        while voice_state.player.is_playing():
+        while voice_state.voice_client.is_playing():
             time.sleep(1)
 
         return
@@ -190,48 +188,43 @@ class TownTuneBot:
 
     def update_voice_clients(self):
         """Check each active voice client to see if its song needs to be changed or restarted. """
-        for server_id, state in self.voice_states.items():
+        for guild_id, state in self.voice_states.items():
             if os.environ['ENV'] == 'development':
-                logging.info('Updating client on server %s - %s', state.server.id, state.server.name)
+                logging.info('Updating client on server %s - %s', state.guild.id, state.guild.name)
 
             # if len(state.voice_client.channel.voice_members) == 1:
             #     logging.info('Dropping')
 
             last_checked_hour = state.last_checked_hour
             current_server_hour = self.test_hour if self.test_hour is not None else (
-                    dt.datetime.today() + dt.timedelta(hours=get_utc_offset_for_server(state.server))).hour
+                    dt.datetime.today() + dt.timedelta(hours=get_utc_offset_for_server(state.guild))).hour
 
             if last_checked_hour != current_server_hour:
                 if os.environ['ENV'] == 'development':
-                    logging.info('Changing to next song on server %s - %s', state.server.id, state.server.name)
+                    logging.info('Changing to next song on server %s - %s', state.guild.id, state.guild.name)
 
-                if state.is_playing():
-                    for i in range(0, 5):
-                        state.player.volume = state.player.volume - 0.2
-                        time.sleep(0.5)
+                # if state.voice_client.is_playing():
+                    # for i in range(0, 5):
+                    #     state.player.volume = state.player.volume - 0.2
+                    #     time.sleep(0.5)
 
-                    state.player.stop()
-                    self.play_hour_chime(state)
+                    # state.voice_client.stop()
+                    # self.play_hour_chime(state)
 
-                state.player = state.voice_client.create_ffmpeg_player(
-                    filename='audio/{}.mp3'.format(current_server_hour))
-                state.player.start()
+                state.voice_client.stop()
+                state.voice_client.play(discord.FFmpegPCMAudio('audio/{}.mp3'.format(current_server_hour)))
 
                 state.last_checked_hour = current_server_hour
             else:
-                if not state.is_playing():
+                if not state.voice_client.is_playing():
                     if os.environ['ENV'] == 'development':
-                        logging.info('Restarting song on server %s - %s', state.server.id, state.server.name)
+                        logging.info('Restarting song on server %s - %s', state.guild.id, state.guild.name)
 
-                    player = state.voice_client.create_ffmpeg_player(
-                        filename='audio/{}.mp3'.format(current_server_hour))
-                    player.start()
-
-                    state.player = player
+                    state.voice_client.play(discord.FFmpegPCMAudio('audio/{}.mp3'.format(current_server_hour)))
                     state.last_checked_hour = current_server_hour
                 else:
                     if os.environ['ENV'] == 'development':
-                        logging.info('Continuing song on server %s - %s', state.server.id, state.server.name)
+                        logging.info('Continuing song on server %s - %s', state.guild.id, state.guild.name)
 
     @commands.command(pass_context=True, no_pm=True)
     async def settesthour(self, ctx, *, hour: int=None):
@@ -239,7 +232,7 @@ class TownTuneBot:
             self.test_hour = hour
             logging.info('Test hour is now {}'.format(self.test_hour))
         else:
-            logging.warning('Development command was tried in %s - %s', ctx.message.server.name, ctx.message.server.id)
+            logging.warning('Development command was tried in %s - %s', ctx.message.guild.name, ctx.message.guild.id)
             return False
 
     @commands.command(pass_context=True, no_pm=True)
@@ -251,30 +244,30 @@ class TownTuneBot:
         :type ctx: discord.ext.commands.Context
         :return: False if the command issuer is not in a voice channel
         """
-        summoned_channel = ctx.message.author.voice_channel
+        summoned_channel = ctx.message.author.voice.channel
         if summoned_channel is None:
             await self.bot.say('You must be in a voice channel to use ~towntune')
             return False
 
-        state = self.get_voice_state(ctx.message.server)
+        state = self.get_voice_state(ctx.message.guild)
         if state.voice_client is None:
-            state.voice_client = await self.bot.join_voice_channel(summoned_channel)
+            state.voice_client = await summoned_channel.connect()
         else:
             await state.voice_client.move_to(summoned_channel)
 
         current_server_hour = (dt.datetime.today()
-                               + dt.timedelta(hours=get_utc_offset_for_server(ctx.message.server))).hour
+                               + dt.timedelta(hours=get_utc_offset_for_server(ctx.message.guild))).hour
+        state.last_checked_hour = current_server_hour
 
-        try:
-            player = state.voice_client.create_ffmpeg_player(filename='audio/{}.mp3'.format(current_server_hour))
-            player.start()
-
-            state.player = player
-            state.last_checked_hour = current_server_hour
-        except Exception as e:
-            logging.error('An error occurred in %s - %s\n%s', ctx.message.server.name, ctx.message.server.id, e)
-            fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
-            await self.bot.send_message(ctx.message.channel, fmt.format(type(e).__name__, e))
+        # try:
+        #     player = state.voice_client.play(discord.FFmpegPCMAudio('audio/{}.mp3'.format(current_server_hour)))
+        #
+        #     state.player = player
+        #     state.last_checked_hour = current_server_hour
+        # except Exception as e:
+        #     logging.error('An error occurred in %s - %s\n%s', ctx.message.guild.name, ctx.message.guild.id, e)
+        #     fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
+        #     await self.bot.send_message(ctx.message.channel, fmt.format(type(e).__name__, e))
 
     @commands.command(pass_context=True, no_pm=True)
     async def stop(self, ctx):
@@ -285,8 +278,8 @@ class TownTuneBot:
         :type ctx: discord.ext.commands.Context
         :return:
         """
-        server = ctx.message.server
-        state = self.get_voice_state(server)
+        guild = ctx.message.guild
+        state = self.get_voice_state(guild)
 
         if state.is_playing():
             player = state.player
@@ -294,9 +287,9 @@ class TownTuneBot:
 
         try:
             await state.voice_client.disconnect()
-            del self.voice_states[server.id]
+            del self.voice_states[guild.id]
         except Exception as e:
-            logging.error('An error occurred in %s - %s\n%s', ctx.message.server.name, ctx.message.server.id, e)
+            logging.error('An error occurred in %s - %s\n%s', ctx.message.guild.name, ctx.message.guild.id, e)
             fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
             await self.bot.send_message(ctx.message.channel, fmt.format(type(e).__name__, e))
 
