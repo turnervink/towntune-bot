@@ -270,13 +270,9 @@ class TownTuneBot(commands.Cog):
             player = state.player
             player.stop()
 
-        try:
+        if state.voice_client is not None:
             await state.voice_client.disconnect()
             del self.voice_states[guild.id]
-        except Exception as e:
-            logging.error('An error occurred in %s - %s\n%s', ctx.message.guild.name, ctx.message.guild.id, e)
-            fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
-            await ctx.message.channel.send(fmt.format(type(e).__name__, e))
 
 
 bot = commands.Bot(command_prefix=commands.when_mentioned, description="Welcome to Animal Crossing!")
