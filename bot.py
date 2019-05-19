@@ -157,7 +157,7 @@ class TownTuneBot(commands.Cog):
         """
         Get the VoiceState object for a server, or create one if it doesn't exist.
 
-        :param server: the server to get the VoiceState for.
+        :param guild: the server to get the VoiceState for.
         :return: the VoiceState object
         :rtype: VoiceState
         """
@@ -168,9 +168,6 @@ class TownTuneBot(commands.Cog):
             self.voice_states[guild.id] = state
 
         return state
-
-    def play_hour_chime(self, voice_client):
-        voice_client.play(discord.FFmpegPCMAudio('audio/hour-chime.mp3'))
 
     def schedule_voice_client_update(self, seconds):
         """
@@ -188,7 +185,6 @@ class TownTuneBot(commands.Cog):
         for guild_id, state in self.voice_states.items():
             if os.environ['ENV'] == 'development':
                 logging.info('Updating client on server %s - %s', state.guild.id, state.guild.name)
-
 
             last_checked_hour = state.last_checked_hour
             current_server_hour = self.test_hour if self.test_hour is not None else (
@@ -242,16 +238,17 @@ class TownTuneBot(commands.Cog):
         :type ctx: discord.ext.commands.Context
         :return: False if the command issuer is not in a voice channel
         """
-        summoned_channel = ctx.message.author.voice.channel
-        if summoned_channel is None:
-            await self.bot.say('You must be in a voice channel to use ~towntune')
+        summoner = ctx.author.voice
+        if summoner is None:
+            logging.warning('User is not in a voice channel')
+            await ctx.send('You must be in a voice channel to start TownTune')
             return False
 
         state = self.get_voice_state(ctx.message.guild)
         if state.voice_client is None:
-            state.voice_client = await summoned_channel.connect()
+            state.voice_client = await summoner.channel.connect()
         else:
-            await state.voice_client.move_to(summoned_channel)
+            await state.voice_client.move_to(summoner.channel)
 
         current_server_hour = (dt.datetime.today()
                                + dt.timedelta(hours=get_utc_offset_for_server(ctx.message.guild))).hour
@@ -279,7 +276,7 @@ class TownTuneBot(commands.Cog):
         except Exception as e:
             logging.error('An error occurred in %s - %s\n%s', ctx.message.guild.name, ctx.message.guild.id, e)
             fmt = 'An error occurred while processing this request: ```py\n{}: {}\n```'
-            await self.bot.send_message(ctx.message.channel, fmt.format(type(e).__name__, e))
+            await ctx.message.channel.send(fmt.format(type(e).__name__, e))
 
 
 bot = commands.Bot(command_prefix=commands.when_mentioned, description="Welcome to Animal Crossing!")
